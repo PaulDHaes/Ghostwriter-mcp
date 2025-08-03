@@ -222,36 +222,66 @@ async def generate_codename():
     return await _post(query)
 
 
-async def create_client(name: str, short_name: str, codename: str):
+async def create_client(
+    name: str,
+    short_name: str,
+    codename: str,
+    address: str = None,
+    note: str = None,
+    timezone: str = None,
+):
     query = """
-    mutation CreateClient($name: String!, $short_name: String!, $codename: String!) {
+    mutation CreateClient(
+        $name: String!,
+        $short_name: String!,
+        $codename: String!,
+        $address: String,
+        $note: String,
+        $timezone: String
+    ) {
       insert_client(objects: [
-        { name: $name, shortName: $short_name, codename: $codename }
+        {
+          name: $name,
+          shortName: $short_name,
+          codename: $codename,
+          address: $address,
+          note: $note,
+          timezone: $timezone
+        }
       ]) {
         returning {
           id
           name
+          shortName
           codename
+          address
+          note
+          timezone
         }
       }
     }
     """
+
     variables = {
         "name": name,
         "short_name": short_name,
         "codename": codename,
+        "address": address,
+        "note": note,
+        "timezone": timezone,
     }
+
     result = await _post(query, variables)
     client = result.get("data", {}).get("insert_client", {}).get("returning", [])
-    return client[0]
+    return client[0] if client else None
 
 
 async def create_project(
     clientId: int,
     codename: str,
     projectTypeId: int,
-    startDate: str,
-    endDate: str,
+    startDate: str = None,
+    endDate: str = None,
 ):
     query = """
     mutation CreateProject(

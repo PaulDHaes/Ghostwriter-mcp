@@ -1,6 +1,6 @@
 import logging
 from mcp.server.fastmcp import FastMCP
-from ghostwriter_api import (
+from temp_ghostwriter_api import (
     search_findings,
     search_reports,
     search_clients,
@@ -21,10 +21,11 @@ server.description = """
 Ghostwriter MCP Server for penetration testing report management.
 
 WORKFLOW DEPENDENCIES:
-1. First: create_ghostwriter_client (returns clientId)
-2. Then: create_ghostwriter_project (needs clientId from step 1, returns projectId)
-3. Then: create_ghostwriter_report (needs projectId from step 2, returns reportId)
-4. Finally: attach_finding_to_report (needs reportId from step 3)
+1. First: Generate a codename
+2. Then: create_ghostwriter_client (needs a codename from step 1, returns clientId)
+3. Then: create_ghostwriter_project (needs clientId from step 2, returns projectId)
+4. Then: create_ghostwriter_report (needs projectId from step 3, returns reportId)
+5. Finally: attach_finding_to_report (needs reportId from step 4)
 
 Always follow this sequence when creating new reports from scratch.
 """
@@ -203,7 +204,7 @@ async def generate_ghostwriter_codename(dummy: str = ""):
     - codename: Unique identifier (e.g., "ACME2024")
     
     OPTIONAL PARAMETERS (can be empty/null):
-    - address: Client's physical address
+    - address: Client's physical address no ',' in the string
     - note: Additional notes about the client
     - timezone: Client's timezone (e.g., "America/New_York")
     

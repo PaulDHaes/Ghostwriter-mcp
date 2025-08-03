@@ -34,3 +34,9 @@ uvx mcpo --port 8000 -- python3 main.py
 Try connecting to the ip you execute the script from+new port
 
 `http://127.0.0.1:8000`
+
+## What can it do
+It should be able to create a new client,project and report.
+It then can also attach findings to a report + update the findings for now only the evidence and affected entities part.
+It can generate codename for clients and projects.
+It should also be ables to search for clienst,project,reports and findings for avoiding duplication problems.

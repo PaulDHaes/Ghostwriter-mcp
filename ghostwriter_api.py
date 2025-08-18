@@ -72,20 +72,16 @@ async def search_clients(search_term: str):
         codename
         address
         note
-        timezone
       }
     }
     """
     variables = {"term": f"%{search_term}%"}
     result = await _post(query, variables)
 
-    # Process results to handle null/empty optional fields gracefully
     if result.get("data", {}).get("client"):
         for client in result["data"]["client"]:
-            # Ensure optional fields have fallback values
             client["address"] = client.get("address") or ""
             client["note"] = client.get("note") or ""
-            client["timezone"] = client.get("timezone") or ""
             client["shortName"] = client.get("shortName") or ""
 
     return result
@@ -121,17 +117,13 @@ async def search_projects(search_term: str):
     variables = {"term": f"%{search_term}%"}
     result = await _post(query, variables)
 
-    # Process results to handle null/empty optional fields gracefully
     if result.get("data", {}).get("project"):
         for project in result["data"]["project"]:
-            # Ensure optional fields have fallback values
             project["note"] = project.get("note") or ""
             project["startDate"] = project.get("startDate") or ""
             project["endDate"] = project.get("endDate") or ""
-            # Handle nested projectType that might be null
             if not project.get("projectType"):
                 project["projectType"] = {"projectType": "Unknown"}
-            # Handle nested client that might be null
             if not project.get("client"):
                 project["client"] = {"name": "", "codename": ""}
     return result
@@ -228,60 +220,42 @@ async def create_client(
     codename: str,
     address: str = None,
     note: str = None,
-    timezone: str = None,
 ):
-    query = """
-    mutation CreateClient(
-        $name: String!,
-        $short_name: String!,
-        $codename: String!,
-        $address: String,
-        $note: String,
-        $timezone: String
-    ) {
+    variables = {
+        "name": name,
+        "shortName": short_name,
+        "codename": codename,
+    }
+
+    fields_to_insert = ["name: $name", "shortName: $shortName", "codename: $codename"]
+
+    query = f"""
+    mutation CreateClient($name: String!, $shortName: String!, $codename: String!, $address: String, $note: String) {{
       insert_client(objects: [
-        {
-          name: $name,
-          shortName: $short_name,
-          codename: $codename,
-          address: $address,
-          note: $note,
-          timezone: $timezone
-        }
-      ]) {
-        returning {
+        {{ {', '.join(fields_to_insert)} }}
+      ]) {{
+        returning {{
           id
           name
-          shortName
           codename
           address
           note
-          timezone
-        }
-      }
-    }
+        }}
+      }}
+    }}
     """
-
-    variables = {
-        "name": name,
-        "short_name": short_name,
-        "codename": codename,
-        "address": address,
-        "note": note,
-        "timezone": timezone,
-    }
 
     result = await _post(query, variables)
     client = result.get("data", {}).get("insert_client", {}).get("returning", [])
-    return client[0] if client else None
+    return client[0]
 
 
 async def create_project(
     clientId: int,
     codename: str,
     projectTypeId: int,
-    startDate: str = None,
-    endDate: str = None,
+    startDate: str,
+    endDate: str,
 ):
     query = """
     mutation CreateProject(
@@ -344,7 +318,7 @@ async def create_report(title: str, projectId: int, last_update: str):
 
 async def add_finding_to_report(findingId: int, reportId: int):
     query = """
-    mutation ($findingId: Int!, $reportId: Int!) {
+    mutation attachFinding($findingId: Int!, $reportId: Int!) {
       attachFinding(findingId: $findingId, reportId: $reportId) {
         id
       }
@@ -369,36 +343,37 @@ async def list_report_findings(reportId: int):
 async def update_report_finding(
     findingId: int, replicationSteps: str = None, affectedEntities: str = None
 ):
-    # Build the dynamic _set dictionary
-    set_fields = {}
-    if replicationSteps is not None:
-        set_fields["replication_steps"] = replicationSteps
-    if affectedEntities is not None:
-        set_fields["affectedEntities"] = affectedEntities
+    set_fields_string = ""
+    variables = {"findingId": int(findingId)}
 
-    # If nothing to update, fail early
-    if not set_fields:
+    if replicationSteps is not None:
+        set_fields_string += "replication_steps: $replicationSteps"
+        variables["replicationSteps"] = replicationSteps
+
+    if affectedEntities is not None:
+        if set_fields_string:
+            set_fields_string += ", "
+        set_fields_string += "affectedEntities: $affectedEntities"
+        variables["affectedEntities"] = affectedEntities
+
+    if not set_fields_string:
         raise ValueError(
             "At least one of replicationSteps or affectedEntities must be provided."
         )
 
-    query = """
-    mutation updateFinding($findingId: bigint!, $_set: reportedFinding_set_input) {
+    query = f"""
+    mutation updateFinding($findingId: bigint!, $replicationSteps: String, $affectedEntities: String) {{
       update_reportedFinding(
-        where: { id: { _eq: $findingId } },
-        _set: $_set
-      ) {
+        where: {{ id: {{ _eq: $findingId }} }},
+        _set: {{ {set_fields_string} }}
+      ) {{
         affected_rows
-        returning {
+        returning {{
           id
           replication_steps
           affectedEntities
-        }
-      }
-    }
+        }}
+      }}
+    }}
     """
-    variables = {
-        "findingId": int(findingId),
-        "_set": set_fields,
-    }
     return await _post(query, variables)

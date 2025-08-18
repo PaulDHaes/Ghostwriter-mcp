@@ -1,6 +1,7 @@
 import logging
 from mcp.server.fastmcp import FastMCP
-from temp_ghostwriter_api import (
+from typing import Optional
+from ghostwriter_api import (
     search_findings,
     search_reports,
     search_clients,
@@ -21,11 +22,10 @@ server.description = """
 Ghostwriter MCP Server for penetration testing report management.
 
 WORKFLOW DEPENDENCIES:
-1. First: Generate a codename
-2. Then: create_ghostwriter_client (needs a codename from step 1, returns clientId)
-3. Then: create_ghostwriter_project (needs clientId from step 2, returns projectId)
-4. Then: create_ghostwriter_report (needs projectId from step 3, returns reportId)
-5. Finally: attach_finding_to_report (needs reportId from step 4)
+1. First: create_ghostwriter_client (returns clientId)
+2. Then: create_ghostwriter_project (needs clientId from step 1, returns projectId)
+3. Then: create_ghostwriter_report (needs projectId from step 2, returns reportId)
+4. Finally: attach_finding_to_report (needs reportId from step 3)
 
 Always follow this sequence when creating new reports from scratch.
 """
@@ -33,7 +33,7 @@ Always follow this sequence when creating new reports from scratch.
 
 @server.tool(
     name="search_ghostwriter_findings",
-    description="Search for Ghostwriter findings by title.",
+    description="Search for Ghostwriter findings by title. This gives the findingId back",
 )
 async def search_ghostwriter_findings(search_term: str):
     try:
@@ -44,7 +44,7 @@ async def search_ghostwriter_findings(search_term: str):
                 "id": f["id"],
                 "title": f["title"],
                 "severity": f["severity"]["severity"],
-                "description": f["description"][:100] + "...",  # Truncated
+                "description": f["description"][:100] + "...",
             }
             for f in findings
         ]
@@ -93,7 +93,7 @@ async def search_ghostwriter_reports(search_term: str):
     RETURNS: List of clients with their IDs - use the 'id' field as clientId in create_ghostwriter_project
     
     REQUIRED FIELDS: Only 'name' and 'codename' are guaranteed to be present
-    OPTIONAL FIELDS: May include shortName, address, note, timezone (empty string if not set)
+    OPTIONAL FIELDS: May include shortName, address, note (empty string if not set)
     
     Example searches:
     - search_ghostwriter_clients("Acme") → finds "Acme Corp", "Acme Industries", etc.
@@ -114,11 +114,9 @@ async def search_ghostwriter_clients(search_term: str):
                 "id": c["id"],
                 "name": c["name"],
                 "codename": c["codename"],
-                # Optional fields - may be empty strings if not set
                 "shortName": c.get("shortName", ""),
                 "address": c.get("address", ""),
                 "note": c.get("note", ""),
-                "timezone": c.get("timezone", ""),
                 "_workflow_note": f"Use id={c['id']} as clientId for create_ghostwriter_project",
             }
             for c in clients
@@ -159,7 +157,6 @@ async def search_ghostwriter_projects(search_term: str):
                 "id": p["id"],
                 "codename": p["codename"],
                 "clientId": p["clientId"],
-                # Optional fields - may be empty strings if not set
                 "projectType": p.get("projectType", {}).get("projectType", "Unknown"),
                 "startDate": p.get("startDate", ""),
                 "endDate": p.get("endDate", ""),
@@ -204,9 +201,8 @@ async def generate_ghostwriter_codename(dummy: str = ""):
     - codename: Unique identifier (e.g., "ACME2024")
     
     OPTIONAL PARAMETERS (can be empty/null):
-    - address: Client's physical address no ',' in the string
+    - address: Client's physical address
     - note: Additional notes about the client
-    - timezone: Client's timezone (e.g., "America/New_York")
     
     Example workflow:
     1. Call search_ghostwriter_clients("ClientName") to check if exists
@@ -219,14 +215,11 @@ async def create_ghostwriter_client(
     name: str,
     short_name: str,
     codename: str,
-    address: str = None,
-    note: str = None,
-    timezone: str = None,
+    address: Optional[str] = None,
+    note: Optional[str] = None,
 ) -> dict:
     try:
-        client_data = await create_client(
-            name, short_name, codename, address, note, timezone
-        )
+        client_data = await create_client(name, short_name, codename, address, note)
 
         if not client_data:
             return {"error": "Failed to create client - no data returned"}
@@ -234,11 +227,10 @@ async def create_ghostwriter_client(
         result = {
             "id": client_data["id"],
             "name": client_data["name"],
-            "shortName": client_data.get("shortName", ""),
+            "shortName": client_data.get("short_name", ""),
             "codename": client_data["codename"],
             "address": client_data.get("address", ""),
             "note": client_data.get("note", ""),
-            "timezone": client_data.get("timezone", ""),
             "_workflow_note": "Save this 'id' as clientId for create_ghostwriter_project",
         }
 
@@ -281,8 +273,8 @@ async def create_ghostwriter_project(
     clientId: int,
     codename: str,
     projectTypeId: int,
-    startDate: str,
-    endDate: str,
+    startDate: Optional[str] = None,
+    endDate: Optional[str] = None,
 ):
     try:
         result = await create_project(
@@ -323,6 +315,7 @@ async def create_ghostwriter_project(
     - 'projectId': Get this from either:
       • create_ghostwriter_project output (if creating new project)
       • search_ghostwriter_projects output (if using existing project)
+    - 'last_update': is date that the report was last updated most likely this current date in YYYY-MM-DD
     
     Example: If search found project {"id": 456, ...}, use projectId=456
     """,
@@ -330,7 +323,7 @@ async def create_ghostwriter_project(
 async def create_ghostwriter_report(
     title: str,
     projectId: int,
-    last_update: str,
+    last_update: Optional[str] = None,
 ):
     try:
         result = await create_report(title, projectId, last_update)
@@ -344,7 +337,6 @@ async def create_ghostwriter_report(
             "_workflow_note": "Save this 'id' as reportId for attach_finding_to_report",
         }
 
-        # Log for LLM context
         logging.info(
             f"Report created with ID: {response['id']} - Use this as reportId for findings"
         )
@@ -363,7 +355,7 @@ async def create_ghostwriter_report(
     REQUIRES: reportId from create_ghostwriter_report OR search_ghostwriter_reports
     
     Parameters:
-    - 'finding': Either a finding ID (int) or title (str) to search for
+    - 'findingID': Either a finding ID (int) or title (str) to search for
     - 'reportId': Get this from either:
       • create_ghostwriter_report output (if creating new report)
       • search_ghostwriter_reports output (if using existing report)
@@ -409,10 +401,19 @@ async def list_report_finding_titles_tool(reportId: int):
 
 @server.tool(
     name="update_report_finding",
-    description="Update the replication steps and/or affected entities of a reported finding. Provide at least one.",
+    description="""Update the replication steps and/or affected entities of a reported finding.
+    
+    DEPENDENCY: This is STEP 5 in the workflow.
+    REQUIRES: findingId = reportedFindingId from attach_finding_to_report result.
+    
+    Parameters:
+    - 'reportedFindingId': The findingId of the finding that was just attached to the report.
+    - 'replicationSteps': A string detailing how to reproduce the finding (optional).
+    - 'affectedEntities': A string listing the assets or hosts affected by the finding (optional).
+    """,
 )
 async def update_report_finding_tool(
-    findingId: float, replicationSteps: str = None, affectedEntities: str = None
+    findingId: int, replicationSteps: str = None, affectedEntities: str = None
 ):
     try:
         result = await update_report_finding(

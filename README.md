@@ -35,6 +35,13 @@ Try connecting to the ip you execute the script from+new port
 
 `http://127.0.0.1:8000`
 
+## Debug
+Checking if MCP server still works used this command 
+```shell
+mcp dev main.py 
+```
+note need to install `uv` and do `uv add "mcp[cli]"` to make it work
+
 ## What can it do
 It should be able to create a new client,project and report.
 It then can also attach findings to a report + update the findings for now only the evidence and affected entities part.

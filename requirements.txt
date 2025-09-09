@@ -2,3 +2,7 @@ httpx
 python-dotenv
 fastmcp
 mcp[cli]
+langgraph 
+langchain_ollama 
+langchain_core
+asyncio

@@ -1,3 +1,4 @@
+# File: main.py
 import logging
 from mcp.server.fastmcp import FastMCP
 from typing import Optional
@@ -13,6 +14,9 @@ from ghostwriter_api import (
     add_finding_to_report,
     list_report_findings,
     update_report_finding,
+    get_client_by_id,
+    get_project_by_id,
+    get_report_by_id,
 )
 
 server = FastMCP("GhostwriterMCP")
@@ -33,11 +37,11 @@ Always follow this sequence when creating new reports from scratch.
 
 @server.tool(
     name="search_ghostwriter_findings",
-    description="Search for Ghostwriter findings by title. This gives the findingId back",
+    description="Search for Ghostwriter findings by title or ID. This gives the findingId back",
 )
-async def search_ghostwriter_findings(search_term: str):
+async def search_ghostwriter_findings(search_term: Optional[str] = None):
     try:
-        results = await search_findings(search_term)
+        results = await search_findings(search_term=search_term)
         findings = results["data"]["finding"]
         return [
             {
@@ -55,7 +59,7 @@ async def search_ghostwriter_findings(search_term: str):
 
 @server.tool(
     name="search_ghostwriter_reports",
-    description="""Search Ghostwriter reports by title.
+    description="""Search Ghostwriter reports by title or ID.
     
     USE CASE: Find existing reports to work with, or check if a report already exists.
     SEARCH BY: Report title (partial matches supported)
@@ -66,9 +70,9 @@ async def search_ghostwriter_findings(search_term: str):
     - search_ghostwriter_reports("Web App") → finds all reports with "Web App" in the title
     """,
 )
-async def search_ghostwriter_reports(search_term: str):
+async def search_ghostwriter_reports(search_term: Optional[str] = None):
     try:
-        results = await search_reports(search_term)
+        results = await search_reports(search_term=search_term)
         reports = results["data"]["report"]
         return [
             {
@@ -86,7 +90,7 @@ async def search_ghostwriter_reports(search_term: str):
 
 @server.tool(
     name="search_ghostwriter_clients",
-    description="""Search for existing Ghostwriter clients by name, codename, or shortName.
+    description="""Search for existing Ghostwriter clients by name, codename, shortName, or ID.
     
     USE CASE: Before creating a new client, search to see if it already exists.
     SEARCH BY: Client name, codename, or shortName (partial matches supported)
@@ -105,9 +109,9 @@ async def search_ghostwriter_reports(search_term: str):
     3. If not found: create new client with create_ghostwriter_client
     """,
 )
-async def search_ghostwriter_clients(search_term: str):
+async def search_ghostwriter_clients(search_term: Optional[str] = None):
     try:
-        results = await search_clients(search_term)
+        results = await search_clients(search_term=search_term)
         clients = results["data"]["client"]
         return [
             {
@@ -128,7 +132,7 @@ async def search_ghostwriter_clients(search_term: str):
 
 @server.tool(
     name="search_ghostwriter_projects",
-    description="""Search for existing Ghostwriter projects by codename or client info.
+    description="""Search for existing Ghostwriter projects by codename, client info, or ID.
     
     USE CASE: Before creating a new project, search to see if it already exists.
     SEARCH BY: Project codename, client name, or client codename (partial matches supported)
@@ -148,9 +152,9 @@ async def search_ghostwriter_clients(search_term: str):
     3. If not found: create new project with create_ghostwriter_project
     """,
 )
-async def search_ghostwriter_projects(search_term: str):
+async def search_ghostwriter_projects(search_term: Optional[str] = None):
     try:
-        results = await search_projects(search_term)
+        results = await search_projects(search_term=search_term)
         projects = results["data"]["project"]
         return [
             {
@@ -169,6 +173,83 @@ async def search_ghostwriter_projects(search_term: str):
         ]
     except Exception as e:
         logging.error(f"Error searching projects: {e}")
+        return {"error": str(e)}
+
+
+@server.tool(
+    name="get_ghostwriter_client_by_id",
+    description="Fetch a Ghostwriter client directly by ID. Returns full client details.",
+)
+async def get_ghostwriter_client_by_id_tool(id: int):
+    try:
+        results = await get_client_by_id(id)
+        client = results["data"]["client"]
+        return [
+            {
+                "id": x["id"],
+                "name": x["name"],
+                "codename": x["codename"],
+                "shortName": x.get("shortName", ""),
+                "address": x.get("address", ""),
+                "note": x.get("note", ""),
+            }
+            for x in client
+        ]
+    except Exception as e:
+        logging.error(f"Error searching clients_id: {e}")
+        return {"error": str(e)}
+
+
+@server.tool(
+    name="get_ghostwriter_project_by_id",
+    description="Fetch a Ghostwriter project directly by ID. Returns project details.",
+)
+async def get_ghostwriter_project_by_id_tool(id: int):
+    try:
+        result = await get_project_by_id(id)
+        project = result["data"]["project"]
+        return [
+            {
+                "id": w["id"],
+                "codename": w["codename"],
+                "clientId": w["clientId"],
+                "projectType": w.get("projectType", {}).get("projectType", "Unknown"),
+                "startDate": w.get("startDate", ""),
+                "endDate": w.get("endDate", ""),
+                "note": w.get("note", ""),
+                "clientName": w.get("client", {}).get("name", ""),
+                "clientCodename": w.get("client", {}).get("codename", ""),
+                "_workflow_note": f"Use id={w['id']} as projectId for create_ghostwriter_report",
+            }
+            for w in project
+        ]
+
+    except Exception as e:
+        logging.error(f"Error fetching project by ID: {e}")
+        return {"error": str(e)}
+
+
+@server.tool(
+    name="get_ghostwriter_report_by_id",
+    description="Fetch a Ghostwriter report directly by ID. Returns report details.",
+)
+async def get_ghostwriter_report_by_id_tool(id: int):
+    try:
+        result = await get_report_by_id(id)
+        reports = result["data"]["report"]
+
+        return [
+            {
+                "id": r["id"],
+                "title": r["title"],
+                "projectId": r["projectId"],
+                "last_update": r.get("last_update", ""),
+            }
+            for r in reports
+        ]
+
+    except Exception as e:
+        logging.error(f"Error fetching report by ID: {e}")
         return {"error": str(e)}
 
 
@@ -402,6 +483,7 @@ async def list_report_finding_titles_tool(reportId: int):
 @server.tool(
     name="update_report_finding",
     description="""Update the replication steps and/or affected entities of a reported finding.
+    Note: This will replace the current text not append to it.
     
     DEPENDENCY: This is STEP 5 in the workflow.
     REQUIRES: findingId = reportedFindingId from attach_finding_to_report result.
@@ -497,6 +579,21 @@ async def explain_workflow():
                     "purpose": "Add findings to existing or new report",
                     "requires": "reportId from step 3a",
                 },
+                {
+                    "step": "traceback-1",
+                    "tool": "get_ghostwriter_report_by_id",
+                    "purpose": "Given a reportId, retrieve its projectId (to trace back to the project).",
+                },
+                {
+                    "step": "traceback-2",
+                    "tool": "get_ghostwriter_project_by_id",
+                    "purpose": "Given a projectId, retrieve its clientId (to trace back to the client).",
+                },
+                {
+                    "step": "traceback-3",
+                    "tool": "get_ghostwriter_client_by_id",
+                    "purpose": "Given a clientId, retrieve full client details (verify correct client).",
+                },
             ],
         },
         "best_practices": [
@@ -515,6 +612,9 @@ async def explain_workflow():
 
 
 if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(server.run(transport="stdio"))
+    # This is the correct way to run your FastMCP server for SSE transport
+    server.settings.host = "192.168.1.107"
+    server.settings.port = 8008
+    server.run(transport="sse")
+    # host="127.0.0.1",  # Or 'localhost'
+    # port=8000

@@ -42,6 +42,7 @@ async def search_findings(search_term: str):
 
 
 async def search_reports(search_term: str):
+    """Search for report by title"""
     query = """
     query ($term: String!) {
       report(where: {title: {_ilike: $term}}) {
@@ -169,38 +170,55 @@ async def get_project_by_id(project_id: int):
     return await _post(query, variables)
 
 
-async def get_projects_by_client(client_id: int):
-    """Get all projects for a specific client"""
+async def get_report_by_id(report_id: int):
+    """Get a specific report by ID"""
     query = """
-    query ($clientId: bigint!) {
-      project(where: {clientId: {_eq: $clientId}}) {
-        id
-        codename
-        startDate
-        endDate
-        projectType {
-          projectType
-        }
-      }
-    }
-    """
-    variables = {"clientId": client_id}
-    return await _post(query, variables)
-
-
-async def get_reports_by_project(project_id: int):
-    """Get all reports for a specific project"""
-    query = """
-    query ($projectId: bigint!) {
-      report(where: {projectId: {_eq: $projectId}}) {
+    query ($reportId: bigint!) {
+      report(where: {id: {_eq: $reportId}}) {
         id
         title
+        projectId
         last_update
       }
     }
     """
-    variables = {"projectId": project_id}
-    return await _post(query, variables)
+    variables = {"reportId": report_id}
+    result = await _post(query, variables)
+    return result
+
+
+# async def get_projects_by_client(client_id: int):
+#     """Get all projects for a specific client"""
+#     query = """
+#     query ($clientId: bigint!) {
+#       project(where: {clientId: {_eq: $clientId}}) {
+#         id
+#         codename
+#         startDate
+#         endDate
+#         projectType {
+#           projectType
+#         }
+#       }
+#     }
+#     """
+#     variables = {"clientId": client_id}
+#     return await _post(query, variables)
+
+
+# async def get_reports_by_project(project_id: int):
+#     """Get all reports for a specific project"""
+#     query = """
+#     query ($projectId: bigint!) {
+#       report(where: {projectId: {_eq: $projectId}}) {
+#         id
+#         title
+#         last_update
+#       }
+#     }
+#     """
+#     variables = {"projectId": project_id}
+#     return await _post(query, variables)
 
 
 async def generate_codename():

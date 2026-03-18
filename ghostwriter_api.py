@@ -1,27 +1,78 @@
 import os
 from dotenv import load_dotenv
 import httpx
+from typing import Any, Dict, Optional
 
 load_dotenv()
 
-GHOSTWRITER_URL = os.getenv("GHOSTWRITER_URL")
+# Support both env names
+GHOSTWRITER_GRAPHQL_URL = os.getenv("GHOSTWRITER_GRAPHQL_URL") or os.getenv(
+    "GHOSTWRITER_URL"
+)
 GHOSTWRITER_API_TOKEN = os.getenv("GHOSTWRITER_API_TOKEN")
+# Default request timeout in seconds
+GHOSTWRITER_REQUEST_TIMEOUT = float(os.getenv("GHOSTWRITER_REQUEST_TIMEOUT", "10"))
+GHOSTWRITER_DEFAULT_PROJECT_TYPE_ID = os.getenv("GHOSTWRITER_DEFAULT_PROJECT_TYPE_ID")
+GHOSTWRITER_DEFAULT_SEVERITY_ID = os.getenv("GHOSTWRITER_DEFAULT_SEVERITY_ID")
+GHOSTWRITER_PAGINATION_LIMIT = int(os.getenv("GHOSTWRITER_PAGINATION_LIMIT", "50"))
 
-HEADERS = {
-    "Content-Type": "application/json",
-    "Authorization": f"Bearer {GHOSTWRITER_API_TOKEN}",
-}
 
+async def _post(
+    query: str,
+    variables: Optional[Dict[str, Any]] = None,
+    timeout: Optional[float] = None,
+    verify: Optional[bool] = None,
+    extra_headers: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """Low-level HTTP POST to Ghostwriter GraphQL with sensible defaults.
 
-async def _post(query: str, variables: dict = None):
-    async with httpx.AsyncClient(verify=False) as client:
-        response = await client.post(
-            GHOSTWRITER_URL,
-            headers=HEADERS,
-            json={"query": query, "variables": variables or {}},
+    - timeout: override default timeout (seconds)
+    - verify: override TLS verify (True/False). If None, defaults to True (verify certificates).
+    - extra_headers: merged into default headers
+    """
+    if not GHOSTWRITER_GRAPHQL_URL:
+        raise RuntimeError(
+            "GHOSTWRITER_GRAPHQL_URL (or GHOSTWRITER_URL) not set in environment"
         )
-        response.raise_for_status()
-        return response.json()
+
+    headers = {"Content-Type": "application/json"}
+    if GHOSTWRITER_API_TOKEN:
+        headers["Authorization"] = f"Bearer {GHOSTWRITER_API_TOKEN}"
+    if extra_headers:
+        headers.update(extra_headers)
+
+    # By default we verify TLS certificates. If you need to disable verification
+    # (not recommended for production), pass verify=False explicitly to this call.
+    if verify is None:
+        verify = True
+
+    client_timeout = httpx.Timeout(timeout or GHOSTWRITER_REQUEST_TIMEOUT)
+
+    async with httpx.AsyncClient(verify=verify, timeout=client_timeout) as client:
+        try:
+            resp = await client.post(
+                GHOSTWRITER_GRAPHQL_URL,
+                headers=headers,
+                json={"query": query, "variables": variables or {}},
+            )
+        except httpx.RequestError as e:
+            raise RuntimeError(f"Network error when calling Ghostwriter GraphQL: {e}") from e
+
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            r = e.response
+            raise RuntimeError(f"Ghostwriter HTTP error {r.status_code}: {r.text}") from e
+
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid JSON response from Ghostwriter: {resp.text}") from exc
+
+    if isinstance(data, dict) and data.get("errors"):
+        raise RuntimeError(f"GraphQL errors: {data['errors']}")
+
+    return data
 
 
 async def search_findings(search_term: str):
@@ -37,11 +88,12 @@ async def search_findings(search_term: str):
       }
     }
     """
-    variables = {"term": f"%{search_term}%"}
+    variables = {"term": f"%{search_term}%" if search_term else "%%"}
     return await _post(query, variables)
 
 
 async def search_reports(search_term: str):
+    """Search for report by title"""
     query = """
     query ($term: String!) {
       report(where: {title: {_ilike: $term}}) {
@@ -51,7 +103,7 @@ async def search_reports(search_term: str):
       }
     }
     """
-    variables = {"term": f"%{search_term}%"}
+    variables = {"term": f"%{search_term}%" if search_term else "%%"}
     return await _post(query, variables)
 
 
@@ -75,7 +127,7 @@ async def search_clients(search_term: str):
       }
     }
     """
-    variables = {"term": f"%{search_term}%"}
+    variables = {"term": f"%{search_term}%" if search_term else "%%"}
     result = await _post(query, variables)
 
     if result.get("data", {}).get("client"):
@@ -114,7 +166,7 @@ async def search_projects(search_term: str):
       }
     }
     """
-    variables = {"term": f"%{search_term}%"}
+    variables = {"term": f"%{search_term}%" if search_term else "%%"}
     result = await _post(query, variables)
 
     if result.get("data", {}).get("project"):
@@ -169,38 +221,55 @@ async def get_project_by_id(project_id: int):
     return await _post(query, variables)
 
 
-async def get_projects_by_client(client_id: int):
-    """Get all projects for a specific client"""
+async def get_report_by_id(report_id: int):
+    """Get a specific report by ID"""
     query = """
-    query ($clientId: bigint!) {
-      project(where: {clientId: {_eq: $clientId}}) {
-        id
-        codename
-        startDate
-        endDate
-        projectType {
-          projectType
-        }
-      }
-    }
-    """
-    variables = {"clientId": client_id}
-    return await _post(query, variables)
-
-
-async def get_reports_by_project(project_id: int):
-    """Get all reports for a specific project"""
-    query = """
-    query ($projectId: bigint!) {
-      report(where: {projectId: {_eq: $projectId}}) {
+    query ($reportId: bigint!) {
+      report(where: {id: {_eq: $reportId}}) {
         id
         title
+        projectId
         last_update
       }
     }
     """
-    variables = {"projectId": project_id}
-    return await _post(query, variables)
+    variables = {"reportId": report_id}
+    result = await _post(query, variables)
+    return result
+
+
+# async def get_projects_by_client(client_id: int):
+#     """Get all projects for a specific client"""
+#     query = """
+#     query ($clientId: bigint!) {
+#       project(where: {clientId: {_eq: $clientId}}) {
+#         id
+#         codename
+#         startDate
+#         endDate
+#         projectType {
+#           projectType
+#         }
+#       }
+#     }
+#     """
+#     variables = {"clientId": client_id}
+#     return await _post(query, variables)
+
+
+# async def get_reports_by_project(project_id: int):
+#     """Get all reports for a specific project"""
+#     query = """
+#     query ($projectId: bigint!) {
+#       report(where: {projectId: {_eq: $projectId}}) {
+#         id
+#         title
+#         last_update
+#       }
+#     }
+#     """
+#     variables = {"projectId": project_id}
+#     return await _post(query, variables)
 
 
 async def generate_codename():
@@ -220,34 +289,36 @@ async def create_client(
     codename: str,
     address: str = None,
     note: str = None,
+    extra_fields: Optional[Dict[str, Any]] = None,
 ):
-    variables = {
+    # Build object for insertion using Hasura input type `client_insert_input`
+    obj: Dict[str, Any] = {
         "name": name,
         "shortName": short_name,
         "codename": codename,
     }
+    if address is not None:
+        obj["address"] = address
+    if note is not None:
+        obj["note"] = note
+    if extra_fields:
+        obj.update(extra_fields)
 
-    fields_to_insert = ["name: $name", "shortName: $shortName", "codename: $codename"]
-
-    query = f"""
-    mutation CreateClient($name: String!, $shortName: String!, $codename: String!, $address: String, $note: String) {{
-      insert_client(objects: [
-        {{ {', '.join(fields_to_insert)} }}
-      ]) {{
-        returning {{
-          id
-          name
-          codename
-          address
-          note
-        }}
-      }}
-    }}
+    query = """
+    mutation CreateClient($object: client_insert_input!) {
+      insert_client_one(object: $object) {
+        id
+        name
+        codename
+        shortName
+        address
+        note
+      }
+    }
     """
-
+    variables = {"object": obj}
     result = await _post(query, variables)
-    client = result.get("data", {}).get("insert_client", {}).get("returning", [])
-    return client[0]
+    return result.get("data", {}).get("insert_client_one")
 
 
 async def create_project(
@@ -256,64 +327,97 @@ async def create_project(
     projectTypeId: int,
     startDate: str,
     endDate: str,
+    extra_fields: Optional[Dict[str, Any]] = None,
 ):
-    query = """
-    mutation CreateProject(
-        $clientId: bigint!,
-        $projectTypeId: bigint!,
-        $codename: String!,
-        $startDate: date!,
-        $endDate: date!
-    ) {
-        insert_project(objects: {
-            clientId: $clientId,
-            projectTypeId: $projectTypeId,
-            codename: $codename,
-            startDate: $startDate,
-            endDate: $endDate
-        }) {
-            returning {
-                id
-                codename
-                startDate
-                endDate
-            }
-        }
-    }
-    """
-    variables = {
+    obj: Dict[str, Any] = {
         "clientId": int(clientId),
         "projectTypeId": int(projectTypeId),
         "codename": codename,
         "startDate": startDate,
         "endDate": endDate,
     }
+    if extra_fields:
+        obj.update(extra_fields)
+
+    query = """
+    mutation CreateProject($object: project_insert_input!) {
+      insert_project_one(object: $object) {
+        id
+        codename
+        startDate
+        endDate
+      }
+    }
+    """
+    variables = {"object": obj}
     return await _post(query, variables)
 
 
 async def create_report(title: str, projectId: int, last_update: str):
+    obj: Dict[str, Any] = {
+        "title": title,
+        "projectId": int(projectId),
+        "last_update": last_update,
+    }
+
     query = """
-    mutation CreateReport($title: String!, $projectId: bigint!, $lastUpdate: date!) {
-      insert_report(objects: {
-        title: $title,
-        projectId: $projectId,
-        last_update: $lastUpdate
-      }) {
-        returning {
-          id
-          title
-          projectId
-          last_update
-        }
+    mutation CreateReport($object: report_insert_input!) {
+      insert_report_one(object: $object) {
+        id
+        title
+        projectId
+        last_update
       }
     }
     """
-    variables = {
-        "title": title,
-        "projectId": int(projectId),
-        "lastUpdate": last_update,
-    }
+    variables = {"object": obj}
     return await _post(query, variables)
+
+
+async def create_finding(
+    title: str,
+    description: str,
+    findingTypeId: Optional[int] = None,
+    severityId: Optional[int] = None,
+    cvssScore: Optional[float] = None,
+    cvssVector: Optional[str] = None,
+    replication_steps: Optional[str] = None,
+    affectedEntities: Optional[str] = None,
+    extra_fields: Optional[Dict[str, Any]] = None,
+):
+    """Create a new finding in the Ghostwriter findings library.
+
+    The function accepts common fields and merges any `extra_fields` into the insert object so
+    callers can provide optional or custom fields without changing this helper.
+    """
+    obj: Dict[str, Any] = {"title": title, "description": description}
+    if findingTypeId is not None:
+        obj["findingTypeId"] = int(findingTypeId)
+    if severityId is not None:
+        obj["severityId"] = int(severityId)
+    if cvssScore is not None:
+        obj["cvssScore"] = float(cvssScore)
+    if cvssVector is not None:
+        obj["cvssVector"] = cvssVector
+    if replication_steps is not None:
+        obj["replication_steps"] = replication_steps
+    if affectedEntities is not None:
+        obj["affectedEntities"] = affectedEntities
+    if extra_fields:
+        obj.update(extra_fields)
+
+    query = """
+    mutation CreateFinding($object: finding_insert_input!) {
+      insert_finding_one(object: $object) {
+        id
+        title
+        description
+      }
+    }
+    """
+    variables = {"object": obj}
+    result = await _post(query, variables)
+    return result.get("data", {}).get("insert_finding_one")
 
 
 async def add_finding_to_report(findingId: int, reportId: int):

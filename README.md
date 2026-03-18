@@ -218,7 +218,7 @@ pip install -r requirements.txt
 ```bash
 python main.py
 ```
-
+# Context for the agent
 Design notes and suggestions for the AI mapping workflow
 
 Your goal: have an AI agent inspect an HTTP request+response and do the following automatically:
